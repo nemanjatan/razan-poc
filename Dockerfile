@@ -26,6 +26,11 @@ COPY . .
 # Expose port (Railway will set PORT env var)
 EXPOSE 8080
 
-# Run Streamlit with shell form to expand $PORT
-CMD sh -c "streamlit run streamlit_app.py --server.port=8080 --server.address=0.0.0.0 --server.headless=true"
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+PORT=${PORT:-8080}\n\
+exec streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
+# Run via entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
