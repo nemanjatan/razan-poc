@@ -35,10 +35,10 @@ with st.sidebar:
     limit_input = st.number_input(
         "Max Initial Contacts",
         min_value=1,
-        max_value=1000,
+        max_value=20,
         value=5,
-        step=5,
-        help="Number of speakers to visit (each visit takes time)"
+        step=1,
+        help="Number of speakers to visit (maximum 20, each visit takes time)"
     )
     
     st.markdown("---")
