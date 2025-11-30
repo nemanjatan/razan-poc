@@ -24,8 +24,8 @@ RUN playwright install chromium && \
 COPY . .
 
 # Expose port (Railway will set PORT env var)
-EXPOSE $PORT
+EXPOSE 8080
 
-# Run Streamlit
-CMD streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+# Run Streamlit with shell form to expand $PORT
+CMD sh -c "streamlit run streamlit_app.py --server.port=${PORT:-8080} --server.address=0.0.0.0 --server.headless=true"
 
