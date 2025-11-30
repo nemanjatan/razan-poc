@@ -3,9 +3,9 @@ nixPkgs = ["python310"]
 
 [phases.install]
 cmds = [
-  "pip install -r requirements.txt",
-  "playwright install chromium",
-  "playwright install-deps chromium"
+  "python -m pip install -r requirements.txt",
+  "python -m playwright install chromium",
+  "python -m playwright install-deps chromium"
 ]
 
 [phases.build]
