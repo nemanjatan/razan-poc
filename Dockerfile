@@ -40,7 +40,6 @@ EXPOSE 8080
 
 # Create entrypoint script that handles PORT variable
 RUN echo '#!/bin/bash\n\
-PORT=${PORT:-8080}\n\
 exec streamlit run streamlit_app.py --server.address=0.0.0.0 --server.headless=true' > /entrypoint.sh && \
     chmod +x /entrypoint.sh
 
