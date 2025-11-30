@@ -4,6 +4,8 @@ WORKDIR /app
 
 # Install system dependencies for Playwright
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
     wget \
     gnupg \
     ca-certificates \
@@ -21,12 +23,10 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers and dependencies
 RUN playwright install chromium && \
@@ -35,14 +35,11 @@ RUN playwright install chromium && \
 # Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 8080
+EXPOSE 8501
 
-# Create entrypoint script that handles PORT variable
-RUN echo '#!/bin/bash\n\
-exec streamlit run streamlit_app.py --server.address=0.0.0.0 --server.headless=true' > /entrypoint.sh && \
-    chmod +x /entrypoint.sh
+HEALTHCHECK CMD curl --fail http://localhost:${PORT:-8501}/_stcore/health || exit 1
 
-# Run via entrypoint
+# Simple entrypoint to set STREAMLIT_SERVER_PORT from Railway's PORT
+RUN echo '#!/bin/sh\nexport STREAMLIT_SERVER_PORT=${PORT:-8501}\nexec streamlit run streamlit_app.py --server.address=0.0.0.0 --server.headless=true' > /entrypoint.sh && chmod +x /entrypoint.sh
+
 ENTRYPOINT ["/entrypoint.sh"]
-
