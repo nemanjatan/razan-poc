@@ -1,16 +1,25 @@
 import logging
+import os
 from typing import Optional
+from dotenv import load_dotenv
 from serpapi import GoogleSearch
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# SerpAPI Key (hardcoded as requested)
-SERPAPI_KEY = "a56127f5ab6c83ea01714dc7ada944ba71de777d4f03f466f7a825d711f193fa"
+# SerpAPI Key from environment variable
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
 def google_search_linkedin(name: str, company: str, title: str) -> str:
     """
     Uses SerpAPI to find a LinkedIn profile.
     """
+    if not SERPAPI_KEY:
+        logger.error("SERPAPI_KEY not found in environment variables")
+        return ""
+        
     if not name:
         return ""
         
