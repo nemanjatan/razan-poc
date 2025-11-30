@@ -27,5 +27,5 @@ COPY . .
 EXPOSE 8080
 
 # Run Streamlit with shell form to expand $PORT
-CMD sh -c "streamlit run streamlit_app.py --server.port=${PORT:-8080} --server.address=0.0.0.0 --server.headless=true"
+CMD sh -c "streamlit run streamlit_app.py --server.port=8080 --server.address=0.0.0.0 --server.headless=true"
 
