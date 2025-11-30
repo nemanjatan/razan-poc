@@ -29,7 +29,8 @@ with st.sidebar:
     url_input = st.text_input(
         "Event URL",
         value="https://atharfestival.evsreg.com/speakers",
-        help="The URL of the page containing the list of speakers"
+        help="The URL of the page containing the list of speakers",
+        disabled=True
     )
     
     limit_input = st.number_input(
