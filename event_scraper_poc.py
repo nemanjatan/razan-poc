@@ -1,40 +1,18 @@
 #!/usr/bin/env python3
 """
-Event Scraper PoC
-=================
+Event Scraper PoC (Refactored)
+==============================
 
-A Proof-of-Concept Python script to scrape contact information (speakers, etc.)
-from event websites using Playwright and export the data to Excel.
-
-Dependencies:
-    - python >= 3.8
-    - playwright
-    - pandas
-    - openpyxl
-
-Installation:
-    pip install playwright pandas openpyxl
-    playwright install chromium
-
-Usage:
-    python event_scraper_poc.py --url "https://atharfestival.evsreg.com/speakers" --limit 20
-
-    # For a different limit:
-    python event_scraper_poc.py --limit 50
-
-    # For a different URL (if structure is similar):
-    python event_scraper_poc.py --url "https://another-event.com/speakers"
+Scrapes speaker information by visiting individual detail pages on Athar Festival.
 
 Author: AI Assistant
 """
 
-import argparse
 import logging
-import sys
 import time
 from datetime import datetime
 from typing import List, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import pandas as pd
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
@@ -47,30 +25,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- DOM Selectors (Documented for maintainability) ---
-# These selectors are based on the 'atharfestival.evsreg.com' structure.
-# If the target website changes, update these constants.
-SELECTOR_SPEAKER_CARD = ".card"  # The container for each person
-SELECTOR_NAME = "h3"             # Name is usually in an h3 tag inside the card
-SELECTOR_JOB_TITLE = "p"         # Job title follows name in a p tag
-# Note: The second <p> often contains company or is empty. Logic handles this.
-
-def parse_arguments():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Scrape event contacts to Excel.")
-    parser.add_argument(
-        "--url",
-        type=str,
-        default="https://atharfestival.evsreg.com/speakers",
-        help="Target URL to scrape (default: Athar Festival Speakers)"
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=20,
-        help="Minimum number of contacts to scrape (default: 20)"
-    )
-    return parser.parse_args()
+# --- DOM Selectors ---
+SELECTOR_CARD_LINK = "section.speakers a[href^='/speakers/detail/']"
+SELECTOR_DETAIL_CONTAINER = ".detail-content"
+SELECTOR_DETAIL_NAME = "h3"
+SELECTOR_DETAIL_TITLE_COMPANY = "p" # First <p> after h3
 
 def extract_text(element, selector: str) -> str:
     """Helper to safely extract text from a sub-element."""
@@ -80,8 +39,7 @@ def extract_text(element, selector: str) -> str:
     except Exception:
         return ""
 
-def determine_category(url: str, text_content: str) -> str:
-    """Infer category (Speaker, Exhibitor, Sponsor) from URL or page content."""
+def determine_category(url: str) -> str:
     url_lower = url.lower()
     if "speaker" in url_lower:
         return "Speaker"
@@ -91,9 +49,69 @@ def determine_category(url: str, text_content: str) -> str:
         return "Sponsor"
     return "Other"
 
+def is_decision_maker(job_title: str) -> bool:
+    """
+    Checks if a job title indicates a decision maker role.
+    Looks for: Directors, Management, C-level (CEO, CMO, CIO, CTO, CFO, etc.)
+    """
+    if not job_title:
+        return False
+    
+    title_lower = job_title.lower()
+    
+    # C-level keywords
+    c_level_keywords = ["ceo", "cmo", "cio", "cto", "cfo", "coo", "chief", "president"]
+    
+    # Director/Management keywords
+    director_keywords = ["director", "managing director", "executive director", "general manager"]
+    
+    # VP/SVP level
+    vp_keywords = ["vice president", "vp", "svp", "evp"]
+    
+    # Partner/Founder level
+    partner_keywords = ["managing partner", "partner", "founder"]
+    
+    # Head of... (senior leadership roles)
+    head_keywords = ["head of"]
+    
+    # Check for any matches
+    all_keywords = c_level_keywords + director_keywords + vp_keywords + partner_keywords + head_keywords
+    
+    for keyword in all_keywords:
+        if keyword in title_lower:
+            return True
+    
+    return False
+
+def split_title_company(text: str):
+    """
+    Heuristic to split 'CEO, Rotana Media Group' or 'CEO at Rotana'
+    """
+    if not text:
+        return "", ""
+    
+    # Common separators
+    separators = [",", " at ", " - ", "|"]
+    
+    for sep in separators:
+        if sep in text:
+            parts = text.split(sep, 1)
+            title = parts[0].strip()
+            company = parts[1].strip()
+            # Clean trailing chars like &
+            if company.endswith("&"):
+                company = company[:-1].strip()
+            return title, company
+            
+    # Fallback: assume whole string is title, company empty? 
+    # Or try to be smart? For now, return as title.
+    return text, ""
+
 def fetch_and_parse(url: str, limit: int) -> List[Dict]:
     """
-    Launches browser, navigates to URL, scrolls to load content, and extracts data.
+    1. Visits main list
+    2. Collects detail URLs
+    3. Visits each detail page to extract info
     """
     contacts = []
     
@@ -104,174 +122,146 @@ def fetch_and_parse(url: str, limit: int) -> List[Dict]:
         page = context.new_page()
 
         try:
-            logger.info(f"Navigating to {url}...")
-            # Use domcontentloaded to avoid waiting for every single image/analytic script
+            logger.info(f"Navigating to main list: {url}")
             page.goto(url, timeout=60000, wait_until='domcontentloaded')
             
-            # Wait for the main list to load. 
-            # We look for at least one card element to appear.
+            # Wait for list
             try:
-                page.wait_for_selector(SELECTOR_SPEAKER_CARD, timeout=15000)
-                logger.info("Initial content loaded.")
+                page.wait_for_selector(SELECTOR_CARD_LINK, timeout=15000)
             except PlaywrightTimeoutError:
-                logger.warning("Timeout waiting for cards. Page structure might be different or empty.")
-                # We continue, maybe static content is there or we can take a snapshot for debugging
+                logger.warning("Timeout waiting for speaker links.")
                 
-            # Scroll to load more items if necessary (Lazy Loading)
-            # Simple scrolling logic: scroll down a few times until we hit limit or stop finding new ones
-            last_count = 0
-            max_scroll_attempts = 10
+            # Scroll to load more items (lazy loading)
+            # We want to collect at least 'limit' links
+            links = set()
+            max_scrolls = 10
             
-            for i in range(max_scroll_attempts):
-                # Check how many we have visible
-                cards = page.query_selector_all(SELECTOR_SPEAKER_CARD)
-                current_count = len(cards)
-                logger.info(f"Found {current_count} cards so far...")
-
-                if current_count >= limit:
+            for i in range(max_scrolls):
+                elements = page.query_selector_all(SELECTOR_CARD_LINK)
+                for el in elements:
+                    href = el.get_attribute("href")
+                    if href:
+                        full_url = urljoin(url, href)
+                        links.add(full_url)
+                
+                if len(links) >= limit:
                     break
-                
-                if current_count == last_count and i > 0:
-                    # No new items loaded after scroll
-                    logger.info("No new items loaded after scroll. Stopping scroll.")
-                    break
-                
-                last_count = current_count
-                
-                # Scroll to bottom
+                    
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(2) # Wait for network/rendering
-
-            # --- Extraction Phase ---
-            logger.info("Extracting data from DOM...")
-            cards = page.query_selector_all(SELECTOR_SPEAKER_CARD)
+                time.sleep(1.5)
+                
+            logger.info(f"Found {len(links)} detail pages. Visiting first {limit}...")
             
-            event_name = "Athar Festival" # Default/fallback
-            # Try to grab title from page title
+            # Convert to list and slice
+            target_links = list(links)[:limit]
+            
+            event_name = "Athar Festival" # Fallback
             page_title = page.title()
-            if page_title:
-                parts = page_title.split("-")
-                if len(parts) > 1:
-                    # e.g. "Speakers - Athar Festival of Creativity" -> "Athar Festival of Creativity"
-                    event_name = parts[1].strip()
-                else:
-                    event_name = parts[0].strip()
+            if "-" in page_title:
+                event_name = page_title.split("-")[1].strip()
 
-            category = determine_category(url, "")
+            # Visit each detail page
+            for i, link in enumerate(target_links):
+                try:
+                    logger.info(f"[{i+1}/{len(target_links)}] Visiting {link}")
+                    page.goto(link, timeout=30000, wait_until='domcontentloaded')
+                    
+                    # Wait for detail content
+                    try:
+                        page.wait_for_selector(SELECTOR_DETAIL_CONTAINER, timeout=10000)
+                    except:
+                        logger.warning(f"Could not find content for {link}")
+                        continue
+                        
+                    container = page.query_selector(SELECTOR_DETAIL_CONTAINER)
+                    if not container:
+                        continue
+                        
+                    # Extract Name
+                    name_el = container.query_selector("h3")
+                    name = name_el.inner_text().strip() if name_el else "Unknown"
+                    
+                    # Extract Title/Company from <p> tags
+                    # Logic: Check first 2 paragraphs.
+                    # Case A: <p>Title, Company</p>
+                    # Case B: <p>Title</p> <p>Company</p>
+                    # Case C: <p>Title</p> <div class="agendaDescTxt">...</div> (Company missing/in desc)
+                    
+                    p_tags = container.query_selector_all("p")
+                    raw_text_1 = p_tags[0].inner_text().strip() if len(p_tags) > 0 else ""
+                    raw_text_2 = p_tags[1].inner_text().strip() if len(p_tags) > 1 else ""
+                    
+                    job_title = ""
+                    company_name = ""
+                    
+                    # Heuristic: If 2nd p is short and seemingly a name (not a bio), assume it's company
+                    # Bios usually longer than 50 chars
+                    if raw_text_2 and len(raw_text_2) < 60 and not " is a " in raw_text_2:
+                        job_title = raw_text_1
+                        company_name = raw_text_2
+                    else:
+                        # Fallback to splitting the first line
+                        job_title, company_name = split_title_company(raw_text_1)
+                        
+                        # If split failed (company empty) and we have a second line that MIGHT be company
+                        # (even if slightly long, but let's be careful not to grab bio)
+                        if not company_name and raw_text_2 and len(raw_text_2) < 100:
+                             # Double check it's not a bio start
+                             if not any(x in raw_text_2.lower() for x in [" is ", " has ", "joined", "graduated"]):
+                                 company_name = raw_text_2
 
-            for card in cards:
-                if len(contacts) >= limit:
-                    break
-                
-                # Extract Name
-                # Selector looks for h3 inside the card-body
-                name = extract_text(card, SELECTOR_NAME)
-                if not name:
-                    continue # Skip empty cards
-                
-                # Extract Description/Role/Company
-                # Usually parsing <p> tags.
-                # Example DOM: <h3>Name</h3> <p>Title</p> <p>Company</p>
-                # But sometimes Company is merged or missing.
-                p_tags = card.query_selector_all("p")
-                job_title = ""
-                company_name = ""
-                
-                if len(p_tags) > 0:
-                    job_title = p_tags[0].inner_text().strip()
-                if len(p_tags) > 1:
-                    company_name = p_tags[1].inner_text().strip()
-                
-                # Basic normalization
-                first_name = ""
-                last_name = ""
-                if name:
+                    # Clean company name
+                    if company_name and company_name.endswith("&"):
+                         company_name = company_name[:-1].strip()
+                    
+                    # Basic name split
                     parts = name.split()
-                    if len(parts) == 1:
-                        first_name = parts[0]
-                    elif len(parts) >= 2:
-                        first_name = parts[0]
-                        last_name = " ".join(parts[1:])
-                
-                contact = {
-                    "event_name": event_name,
-                    "event_url": url,
-                    "source_page": url,
-                    "person_full_name": name,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "job_title": job_title,
-                    "company_name": company_name,
-                    "country": "", # Not easily visible on card surface usually
-                    "category": category,
-                    "email": "",
-                    "phone": "",
-                    "linkedin_url": "",
-                    "company_website": "",
-                    "scraped_at": datetime.now().isoformat()
-                }
-                contacts.append(contact)
+                    first_name = parts[0] if parts else ""
+                    last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+                    
+                    # Determine category: Decision Maker takes priority
+                    if is_decision_maker(job_title):
+                        category = "Decision Maker"
+                    else:
+                        category = determine_category(url)
+                    
+                    contact = {
+                        "event_name": event_name,
+                        "event_url": url,
+                        "source_page": link,
+                        "person_full_name": name,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "job_title": job_title,
+                        "company_name": company_name,
+                        "country": "",
+                        "category": category,
+                        "email": "",
+                        "phone": "",
+                        "linkedin_url": "", # Will be enriched later if enabled
+                        "company_website": "",
+                        "scraped_at": datetime.now().isoformat()
+                    }
+                    contacts.append(contact)
+                    
+                    # Polite delay
+                    # time.sleep(0.5) 
+                    
+                except Exception as e:
+                    logger.error(f"Error scraping detail page {link}: {e}")
+                    continue
 
         except Exception as e:
-            logger.error(f"An error occurred during scraping: {e}")
-            # We don't raise here, we want to return whatever we got so far
+            logger.error(f"Global scraping error: {e}")
             
         finally:
             browser.close()
-            logger.info("Browser closed.")
             
     return contacts
 
+# Keep export function for compatibility
 def export_to_excel(data: List[Dict], filename: str, sheet_name: str):
-    """Export list of dicts to Excel."""
-    if not data:
-        logger.warning("No data to export.")
-        return
-
+    if not data: return
     df = pd.DataFrame(data)
-    
-    # Ensure all columns from requirements exist even if empty
-    required_columns = [
-        "event_name", "event_url", "source_page", "person_full_name",
-        "first_name", "last_name", "job_title", "company_name",
-        "country", "category", "email", "phone", "linkedin_url",
-        "company_website", "scraped_at"
-    ]
-    
-    # Reorder/Add missing cols
-    for col in required_columns:
-        if col not in df.columns:
-            df[col] = ""
-            
-    df = df[required_columns]
-    
-    try:
-        logger.info(f"Saving to {filename}...")
-        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-        logger.info(f"Successfully exported {len(df)} contacts to {filename}")
-    except Exception as e:
-        logger.error(f"Failed to write Excel file: {e}")
-
-def main():
-    args = parse_arguments()
-    
-    logger.info(f"Starting scrape for {args.url} (Target limit: {args.limit})")
-    
-    contacts = fetch_and_parse(args.url, args.limit)
-    
-    logger.info(f"Scraped {len(contacts)} contacts.")
-    
-    if contacts:
-        # Derive filename from domain
-        domain = urlparse(args.url).netloc.replace("www.", "").split(".")[0]
-        filename = f"poc_{domain}_speakers.xlsx"
-        sheet_name = f"{domain}_speakers"[:31] # Excel sheet limit 31 chars
-        
-        export_to_excel(contacts, filename, sheet_name)
-    else:
-        logger.error("No contacts found. Please check the URL or selectors.")
-
-if __name__ == "__main__":
-    main()
-
+    with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
