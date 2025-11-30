@@ -1,2 +1,2 @@
-web: streamlit run streamlit_app.py --server.port=8080 --server.address=0.0.0.0 --server.headless=true
+web: streamlit run streamlit_app.py --server.address=0.0.0.0 --server.headless=true
 
