@@ -125,18 +125,28 @@ if st.button("🚀 Start Process", type="primary"):
             st.subheader("Data Preview")
             st.dataframe(df, use_container_width=True)
             
-            # Download
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                sheet_name = urlparse(url_input).netloc.replace("www.", "").split(".")[0][:31]
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-            
-            st.download_button(
-                label="📥 Download Excel Report",
-                data=buffer.getvalue(),
-                file_name=f"enriched_contacts_{int(time.time())}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Download using template
+            from template_exporter import export_to_template_excel
+            try:
+                excel_data = export_to_template_excel(final_data)
+                st.download_button(
+                    label="📥 Download Excel Report (Template Format)",
+                    data=excel_data,
+                    file_name=f"scraped_contacts_{int(time.time())}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except Exception as e:
+                st.warning(f"Could not use template format: {e}. Falling back to simple export.")
+                # Fallback to simple export
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name="Contacts", index=False)
+                st.download_button(
+                    label="📥 Download Excel Report (Simple Format)",
+                    data=buffer.getvalue(),
+                    file_name=f"enriched_contacts_{int(time.time())}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")

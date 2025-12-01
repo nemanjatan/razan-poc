@@ -32,7 +32,7 @@ RUN pip3 install --no-cache-dir --upgrade pip && \
 RUN playwright install chromium && \
     playwright install-deps chromium
 
-# Copy application code
+# Copy application code (includes csv-templates directory)
 COPY . .
 
 EXPOSE 8501
