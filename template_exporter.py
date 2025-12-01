@@ -26,9 +26,9 @@ def export_to_template_excel(data: List[Dict], template_path: str = "csv-templat
             'Contact Country': 'country',
             'Organization Name': 'company_name',
             'Organization  Website Domain': 'company_website',
-            'Organization Linkedin URL': '',  # We don't have this
-            'Organization City': '',  # We don't have this
-            'Organization  Country': 'country'  # Use contact country as fallback
+            'Organization Linkedin URL': 'company_linkedin',
+            'Organization City': 'company_city',
+            'Organization  Country': 'company_country'
         }
         
         # Convert data to DataFrame

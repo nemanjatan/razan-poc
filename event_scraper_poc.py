@@ -234,12 +234,15 @@ def fetch_and_parse(url: str, limit: int) -> List[Dict]:
                         "last_name": last_name,
                         "job_title": job_title,
                         "company_name": company_name,
-                        "country": "",
+                        "country": "",  # Will be enriched from company location
                         "category": category,
                         "email": "",
                         "phone": "",
                         "linkedin_url": "", # Will be enriched later if enabled
                         "company_website": "",
+                        "company_linkedin": "",  # Will be enriched
+                        "company_city": "",  # Will be enriched
+                        "company_country": "",  # Will be enriched
                         "scraped_at": datetime.now().isoformat()
                     }
                     contacts.append(contact)

@@ -6,7 +6,7 @@ from event_scraper_poc import fetch_and_parse
 from enrichment_service import find_decision_makers as find_decision_makers_mock
 from event_scraper_poc import fetch_and_parse
 # Import services
-from google_search_service import google_search_linkedin
+from google_search_service import google_search_linkedin, find_company_details
 from urllib.parse import urlparse
 import io
 
@@ -96,6 +96,46 @@ if st.button("🚀 Start Process", type="primary"):
                         progress_bar.progress((i + 1) / len(base_contacts))
                     status.update(label="✅ Speaker LinkedIn lookup complete!", state="complete", expanded=False)
 
+            # --- PHASE 3: COMPANY ENRICHMENT (Website, LinkedIn, Location) ---
+            with st.status("Step 3: Enriching Company Details...", expanded=True) as status:
+                # Get unique companies
+                companies = set(c['company_name'] for c in base_contacts if c['company_name'])
+                total_companies = len(companies)
+                
+                # Store company details in a dict
+                company_details_cache = {}
+                
+                progress_bar = st.progress(0)
+                for i, company in enumerate(companies):
+                    st.write(f"Finding details for: **{company}**...")
+                    
+                    details = find_company_details(company)
+                    company_details_cache[company] = details
+                    
+                    if details['website']:
+                        st.write(f"  ✓ Website: {details['website']}")
+                    if details['linkedin']:
+                        st.write(f"  ✓ LinkedIn: {details['linkedin']}")
+                    if details['city'] or details['country']:
+                        st.write(f"  ✓ Location: {details['city']}, {details['country']}")
+                    
+                    progress_bar.progress((i + 1) / total_companies)
+                
+                # Apply company details to all contacts
+                for contact in base_contacts:
+                    company = contact.get('company_name', '')
+                    if company and company in company_details_cache:
+                        details = company_details_cache[company]
+                        contact['company_website'] = details.get('website', '')
+                        contact['company_linkedin'] = details.get('linkedin', '')
+                        contact['company_city'] = details.get('city', '')
+                        contact['company_country'] = details.get('country', '')
+                        # Use company country as contact country if not set
+                        if not contact.get('country') and details.get('country'):
+                            contact['country'] = details.get('country', '')
+                
+                status.update(label=f"✅ Enriched {total_companies} companies!", state="complete", expanded=False)
+
             # --- DISPLAY & EXPORT ---
             final_data = base_contacts
             duration = time.time() - start_time
@@ -106,7 +146,8 @@ if st.button("🚀 Start Process", type="primary"):
                 "event_name", "event_url", "source_page", "person_full_name",
                 "first_name", "last_name", "job_title", "company_name",
                 "country", "category", "email", "phone", "linkedin_url",
-                "company_website", "scraped_at"
+                "company_website", "company_linkedin", "company_city", "company_country",
+                "scraped_at"
             ]
             for col in required_columns:
                 if col not in df.columns:
